@@ -52,6 +52,7 @@ def parse_project(filename):
         project = None
         tasks = None
         subtasks = None
+        comments = None
 
         for inzip_dir_filename in file.namelist():
             inzip_filename = os.path.split(inzip_dir_filename)[1]
@@ -70,23 +71,23 @@ def parse_project(filename):
             else:
                 print(inzip_filename)
 
-        if subtasks is not None and len(subtasks) > 0:
-            tasks_by_id = {}
-            for idx, task in enumerate(tasks):
-                tasks_by_id[task.json["id"]] = idx
+        tasks_by_id = {}
+        if tasks is not None and len(tasks) > 0:
+            for task in tasks:
+                tasks_by_id[task.json["id"]] = task
 
-            for idx, subtask in enumerate(subtasks):
-                tasks_id = subtask.json["task_id"]
-                tasks_by_id[-subtask["id"]] = idx
-                tasks[tasks_by_id[tasks_id]].subtasks.append(subtask)
+        if subtasks is not None and len(subtasks) > 0:
+            for subtask in subtasks:
+                task_id = subtask.json["task_id"]
+                if task_id in tasks_by_id:
+                    tasks_by_id[task_id].subtasks.append(subtask)
+                    tasks_by_id[subtask.json["id"]] = subtask
 
         if comments is not None and len(comments) > 0:
             for comment in comments:
                 parent_id = comment.json["parent_id"]
                 if parent_id in tasks_by_id:
-                    tasks[tasks_by_id[parent_id]].comments.append(comment)
-                elif -parent_id in tasks_by_id:
-                    subtasks[tasks_by_id[-parent_id]].comments.append(comment)
+                    tasks_by_id[parent_id].comments.append(comment)
 
         if project is not None and tasks is not None:
             project.set_tasks(tasks)
@@ -106,15 +107,19 @@ def main():
     users = parse_users(users_filename)
 
     existing_users = sender.get_existing_users()
+    for existing_user in existing_users:
+        user = users.by_email(existing_user)
+        if user:
+            user.udid = existing_users[existing_user]
 
-    emails = users.emails()
-    for email in emails:
-        actual_email = email.replace("@", "-") + "@dair.spb.ru"
-
-        if actual_email not in existing_users:
-            result = sender.post("https://yougile.com/api-v2/users", {"email": actual_email, "isAdmin": False})
+    for email in users.emails():
+        user = users.by_email(email)
+        if user.udid is None:
+            result = sender.post("https://yougile.com/api-v2/users", {"email": user.email, "isAdmin": False})
             new_id = result["id"]
-            existing_users[actual_email] = new_id
+            user.udid = new_id
+
+
 
     projects_directory = os.path.join(source_directory, "projects")
 
@@ -132,7 +137,11 @@ def main():
 
         all_user_udids = {}
         for id in all_user_ids:
-            all_user_udids[users.by_id(id)] = "worker"
+            user = users.by_id(id)
+            if user is not None and user.udid is not None:
+                all_user_udids[user.udid] = "worker"
+            else:
+                print("User " + str(id) + ": no user or udid")
 
         project_data = {"title": project.json["name"], "users": all_user_udids}
         result = sender.post("https://yougile.com/api-v2/projects", project_data)
@@ -143,7 +152,7 @@ def main():
         result = sender.post("https://yougile.com/api-v2/boards", board_data)
         board_id = result["id"]
 
-        column_data = {"title": "Задачи", "color": "#63A441", "boardId": board_id}
+        column_data = {"title": "Задачи", "color": 14, "boardId": board_id}
         result = sender.post("https://yougile.com/api-v2/columns", column_data)
         column_id = result["id"]
 
@@ -151,21 +160,33 @@ def main():
             for subtask in task.subtasks:
                 data = subtask.result_data()
                 user_id = subtask.json["assignee_id"]
-                user_udid = users.by_id(user_id).udid
-                data["assigned"] = [user_udid]
+                user = users.by_id(user_id)
+                if user is not None and user.udid is not None:
+                    user_udid = user.udid
+                    if user_udid == 0:
+                        print("WAT")
+                    data["assigned"] = [user_udid]
                 data["columnId"] = column_id
 
                 result = sender.post("https://yougile.com/api-v2/tasks", data)
-                subtask.udid = result["udid"]
+                subtask.udid = result["id"]
 
             data = task.result_data()
-            user_id = subtask.json["assignee_id"]
-            user_udid = users.by_id(user_id).udid
-            data["assigned"] = [user_udid]
+            if "assignee_id" in task.json:
+                user_id = task.json["assignee_id"]
+                user = users.by_id(user_id)
+                if user is not None and user.udid is not None:
+                    user_udid = user.udid
+                    if user_udid == 0:
+                        print("WAT")
+                    data["assigned"] = [user_udid]
+                else:
+                    print("User " + str(user_id) + ": no user or udid")
+
             data["columnId"] = column_id
 
             result = sender.post("https://yougile.com/api-v2/tasks", data)
-            task.udid = result["udid"]
+            task.udid = result["id"]
 
 if __name__ == '__main__':
     main()

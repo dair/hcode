@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
+
 import urllib.request
 import json
-
+import time
 
 class Yougile:
     def __init__(self, bearer):
@@ -13,14 +15,16 @@ class Yougile:
         }
 
         encoded_data = None
+        jsondata = None
         if data is not None:
             jsondata = json.dumps(data)
             encoded_data = jsondata.encode("utf-8")
 
         req = urllib.request.Request(url, encoded_data, headers, method=method)
 
-        print("Method = " + method + ", url = " + url)
+        print("Method = " + method + ", url = " + url + ", body=\'" + str(jsondata) + "\'")
 
+        time.sleep(1.5)
         try:
             response = urllib.request.urlopen(req)
         except urllib.error.HTTPError as ex:
